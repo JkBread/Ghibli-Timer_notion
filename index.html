@@ -684,8 +684,23 @@
 
     .entry strong {
       color: #a8d0aa;
-      min-width: 80px;
+      min-width: 90px;
       display: inline-block;
+    }
+
+    .entry-actions {
+      margin-top: 12px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .delete-entry-btn {
+      background: rgba(224, 141, 134, 0.95);
+      color: white;
+      padding: 8px 14px;
+      border-radius: 12px;
+      font-size: 0.92rem;
+      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
     }
 
     .footer-tip {
@@ -991,12 +1006,13 @@
     let timerInterval = null;
     let isRunning = false;
 
-    const STORAGE_KEY = "magical_ghibli_timer_saved_entries_v2";
+    const STORAGE_KEY = "magical_ghibli_timer_saved_entries_v3";
 
     function formatTime(totalSeconds) {
-      const hours = Math.floor(totalSeconds / 3600);
-      const minutes = Math.floor((totalSeconds % 3600) / 60);
-      const seconds = totalSeconds % 60;
+      const safeSeconds = Math.max(0, Number(totalSeconds) || 0);
+      const hours = Math.floor(safeSeconds / 3600);
+      const minutes = Math.floor((safeSeconds % 3600) / 60);
+      const seconds = safeSeconds % 60;
 
       return (
         String(hours).padStart(2, "0") + ":" +
@@ -1018,11 +1034,7 @@
     }
 
     function setRunningVisual(running) {
-      if (running) {
-        mainContainer.classList.add("running");
-      } else {
-        mainContainer.classList.remove("running");
-      }
+      mainContainer.classList.toggle("running", running);
     }
 
     function showFinishOverlay() {
@@ -1031,6 +1043,141 @@
 
     function hideFinishOverlay() {
       finishOverlay.classList.remove("show");
+    }
+
+    function normalizeEntries(rawEntries) {
+      if (!Array.isArray(rawEntries)) return [];
+
+      return rawEntries.map((entry, index) => ({
+        id: entry && entry.id ? String(entry.id) : String(Date.now() + index + Math.random()),
+        savedAt: entry && entry.savedAt ? String(entry.savedAt) : "-",
+        ranFor: entry && entry.ranFor ? String(entry.ranFor) : "00:00:00",
+        deducted: entry && entry.deducted ? String(entry.deducted) : "00:00:00",
+        remaining: entry && entry.remaining ? String(entry.remaining) : "00:00:00",
+        note: entry && entry.note ? String(entry.note) : "(No note)"
+      }));
+    }
+
+    function getSavedEntries() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return normalizeEntries(parsed);
+      } catch (error) {
+        console.error("Could not read saved entries:", error);
+        return [];
+      }
+    }
+
+    function saveEntries(entries) {
+      try {
+        const normalized = normalizeEntries(entries);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        return true;
+      } catch (error) {
+        console.error("Could not save entries:", error);
+        alert("Saved entries could not be stored in the browser.");
+        return false;
+      }
+    }
+
+    function renderEntries() {
+      const entries = getSavedEntries();
+
+      if (entries.length === 0) {
+        entriesList.className = "empty";
+        entriesList.textContent = "No saved entries yet.";
+        return;
+      }
+
+      entriesList.className = "";
+      entriesList.innerHTML = entries.map((entry) => {
+        return `
+          <div class="entry" data-entry-id="${escapeHtml(entry.id)}">
+            <div class="entry-row"><strong>Saved at:</strong> ${escapeHtml(entry.savedAt)}</div>
+            <div class="entry-row"><strong>Ran for:</strong> ${escapeHtml(entry.ranFor)}</div>
+            <div class="entry-row"><strong>Deducted:</strong> ${escapeHtml(entry.deducted)}</div>
+            <div class="entry-row"><strong>Remaining:</strong> ${escapeHtml(entry.remaining)}</div>
+            <div class="entry-row"><strong>Note:</strong> ${escapeHtml(entry.note)}</div>
+            <div class="entry-actions">
+              <button class="delete-entry-btn" type="button" data-delete-id="${escapeHtml(entry.id)}">Delete</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function saveEntry(noteText) {
+      const ranForThisSegment = elapsedSeconds;
+      const remainingAfterPause = countdownSeconds;
+
+      const entries = getSavedEntries();
+
+      const entry = {
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+        savedAt: new Date().toLocaleString(),
+        ranFor: formatTime(ranForThisSegment),
+        deducted: formatTime(ranForThisSegment),
+        remaining: formatTime(remainingAfterPause),
+        note: noteText || "(No note)"
+      };
+
+      entries.unshift(entry);
+      saveEntries(entries);
+      renderEntries();
+    }
+
+    function deleteEntryById(entryId) {
+      const entries = getSavedEntries();
+      const filteredEntries = entries.filter((entry) => entry.id !== entryId);
+      saveEntries(filteredEntries);
+      renderEntries();
+      statusText.textContent = "Entry deleted.";
+      statusText.classList.remove("done");
+    }
+
+    function clearEntries() {
+      const entries = getSavedEntries();
+      if (entries.length === 0) {
+        statusText.textContent = "There are no saved entries to clear.";
+        statusText.classList.remove("done");
+        renderEntries();
+        return;
+      }
+
+      const confirmed = confirm("Delete all saved entries?");
+      if (!confirmed) return;
+
+      try {
+        localStorage.setItem(STORAGE_KEY, "[]");
+        const afterClear = getSavedEntries();
+
+        if (afterClear.length !== 0) {
+          throw new Error("Entries still present after clearing.");
+        }
+
+        entriesList.innerHTML = "";
+        entriesList.className = "empty";
+        entriesList.textContent = "No saved entries yet.";
+
+        statusText.textContent = "All saved entries were cleared.";
+        statusText.classList.remove("done");
+      } catch (error) {
+        console.error("Could not clear saved entries:", error);
+
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+          entriesList.innerHTML = "";
+          entriesList.className = "empty";
+          entriesList.textContent = "No saved entries yet.";
+          statusText.textContent = "All saved entries were cleared.";
+          statusText.classList.remove("done");
+        } catch (fallbackError) {
+          console.error("Fallback clear also failed:", fallbackError);
+          alert("Saved entries could not be cleared.");
+        }
+      }
     }
 
     function startTimer() {
@@ -1048,7 +1195,11 @@
 
         countdownSeconds = enteredSeconds;
         elapsedSeconds = 0;
+      } else {
+        elapsedSeconds = 0;
       }
+
+      updateDisplays();
 
       isRunning = true;
       setRunningVisual(true);
@@ -1071,8 +1222,10 @@
           updateDisplays();
 
           saveEntry("Finished automatically");
+
           statusText.textContent = "Time is up! Entry saved automatically.";
           statusText.classList.add("done");
+          noteInput.value = "";
           showFinishOverlay();
         }
       }, 1000);
@@ -1087,9 +1240,13 @@
       setRunningVisual(false);
 
       saveEntry(noteInput.value.trim());
+
       statusText.textContent = "Paused. Entry saved.";
       statusText.classList.remove("done");
+
       noteInput.value = "";
+      elapsedSeconds = 0;
+      updateDisplays();
     }
 
     function resetTimer() {
@@ -1112,61 +1269,9 @@
       statusText.classList.remove("done");
     }
 
-    function getSavedEntries() {
-      const entries = localStorage.getItem(STORAGE_KEY);
-      return entries ? JSON.parse(entries) : [];
-    }
-
-    function saveEntries(entries) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    }
-
-    function saveEntry(noteText) {
-      const entries = getSavedEntries();
-
-      const entry = {
-        ranFor: formatTime(elapsedSeconds),
-        note: noteText || "(No note)",
-        savedAt: new Date().toLocaleString()
-      };
-
-      entries.unshift(entry);
-      saveEntries(entries);
-      renderEntries();
-    }
-
-    function renderEntries() {
-      const entries = getSavedEntries();
-
-      if (entries.length === 0) {
-        entriesList.className = "empty";
-        entriesList.textContent = "No saved entries yet.";
-        return;
-      }
-
-      entriesList.className = "";
-      entriesList.innerHTML = entries.map((entry) => {
-        return `
-          <div class="entry">
-            <div class="entry-row"><strong>Saved at:</strong> ${escapeHtml(entry.savedAt)}</div>
-            <div class="entry-row"><strong>Ran for:</strong> ${escapeHtml(entry.ranFor)}</div>
-            <div class="entry-row"><strong>Note:</strong> ${escapeHtml(entry.note)}</div>
-          </div>
-        `;
-      }).join("");
-    }
-
-    function clearEntries() {
-      const confirmed = confirm("Delete all saved entries?");
-      if (!confirmed) return;
-
-      localStorage.removeItem(STORAGE_KEY);
-      renderEntries();
-    }
-
     function escapeHtml(text) {
       const div = document.createElement("div");
-      div.textContent = text;
+      div.textContent = String(text);
       return div.innerHTML;
     }
 
@@ -1175,10 +1280,24 @@
     resetBtn.addEventListener("click", resetTimer);
     clearEntriesBtn.addEventListener("click", clearEntries);
     closeFinishBtn.addEventListener("click", hideFinishOverlay);
+
     finishOverlay.addEventListener("click", (event) => {
       if (event.target === finishOverlay) {
         hideFinishOverlay();
       }
+    });
+
+    entriesList.addEventListener("click", (event) => {
+      const deleteButton = event.target.closest("[data-delete-id]");
+      if (!deleteButton) return;
+
+      const entryId = deleteButton.getAttribute("data-delete-id");
+      if (!entryId) return;
+
+      const confirmed = confirm("Delete this saved entry?");
+      if (!confirmed) return;
+
+      deleteEntryById(entryId);
     });
 
     updateDisplays();
