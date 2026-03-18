@@ -1146,9 +1146,6 @@
         return;
       }
 
-      const confirmed = confirm("Delete all saved entries?");
-      if (!confirmed) return;
-
       try {
         localStorage.setItem(STORAGE_KEY, "[]");
         const afterClear = getSavedEntries();
@@ -1293,9 +1290,6 @@
 
       const entryId = deleteButton.getAttribute("data-delete-id");
       if (!entryId) return;
-
-      const confirmed = confirm("Delete this saved entry?");
-      if (!confirmed) return;
 
       deleteEntryById(entryId);
     });
